@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Suivi en direct — ARnavtrack</title>
+<meta name="theme-color" content="#0A1C2E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%230A1C2E'/%3E%3Ccircle cx='50' cy='50' r='36' fill='none' stroke='%23C9A24B' stroke-width='4'/%3E%3Cpath d='M50 14 L58 50 L50 86 L42 50 Z' fill='%23C9A24B'/%3E%3Cpath d='M14 50 L50 42 L86 50 L50 58 Z' fill='%23EDE8DA'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root{
+    --navy-deep:#0A1C2E; --navy-mid:#12314C; --navy-panel:#0E2740;
+    --brass:#C9A24B; --brass-dim:#8A7239;
+    --foam:#EDE8DA; --foam-dim:#A9B4BE;
+    --rust:#B54B3A; --track:#E8432E; --ok:#5FB98A;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--navy-deep);color:var(--foam);font-family:'IBM Plex Mono',monospace;min-height:100vh;}
+  .wrap{max-width:760px;margin:0 auto;padding:16px 16px 32px;}
+  .kicker{font-size:11px;letter-spacing:0.32em;color:var(--brass);font-weight:600;}
+  h1{font-family:'IBM Plex Serif',serif;font-weight:700;font-size:26px;margin:4px 0 2px;line-height:1.15;overflow-wrap:anywhere;}
+  .sub{font-size:12px;color:var(--foam-dim);}
+  header{border-bottom:1px solid var(--brass-dim);padding-bottom:12px;margin-bottom:12px;}
+
+  .status{display:flex;align-items:center;gap:8px;font-size:12px;margin:0 0 12px;color:var(--foam-dim);flex-wrap:wrap;}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--foam-dim);flex:none;}
+  .dot.live{background:var(--ok);box-shadow:0 0 0 0 rgba(95,185,138,0.6);animation:pulse 2s infinite;}
+  .dot.stale{background:var(--brass);}
+  .dot.stopped{background:var(--rust);}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(95,185,138,0.55);}70%{box-shadow:0 0 0 9px rgba(95,185,138,0);}100%{box-shadow:0 0 0 0 rgba(95,185,138,0);}}
+  .status b{color:var(--foam);font-weight:600;}
+
+  #map{height:58vh;min-height:300px;border:1px solid var(--brass-dim);background:var(--navy-mid);}
+  .map-tools{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
+  button{font-family:inherit;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;background:var(--navy-panel);color:var(--foam);border:1px solid var(--brass-dim);padding:9px 12px;cursor:pointer;}
+  button.active{background:var(--brass);color:var(--navy-deep);border-color:var(--brass);font-weight:600;}
+
+  .gauges{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:0 0 14px;border:1px solid var(--brass-dim);}
+  .gauge{padding:16px 8px 14px;text-align:center;border-right:1px solid var(--brass-dim);border-bottom:1px solid var(--brass-dim);background:var(--navy-panel);}
+  .gauge:nth-child(2n){border-right:none;}
+  .gauge:nth-child(n+3){border-bottom:none;}
+  .gauge .value{font-size:clamp(28px,8vw,44px);font-weight:700;color:var(--brass);line-height:1;}
+  .gauge .value small{font-size:14px;color:var(--foam-dim);font-weight:400;margin-left:4px;}
+  .gauge .label{font-size:10.5px;letter-spacing:0.18em;color:var(--foam-dim);margin-top:10px;}
+  .meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--foam-dim);margin:-4px 0 14px;}
+  .meta b{color:var(--foam);}
+
+  .empty{border:1px dashed var(--brass-dim);padding:18px;font-size:13px;line-height:1.6;color:var(--foam-dim);margin-bottom:12px;display:none;}
+  .empty.show{display:block;}
+  footer{font-size:10.5px;color:var(--foam-dim);margin-top:18px;line-height:1.6;}
+  .boat-icon{background:none;border:none;}
+  .leaflet-container{font-family:'IBM Plex Mono',monospace;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">AR·NAV·TRACK · SUIVI EN DIRECT</div>
+    <h1 id="title">Trajet en voilier</h1>
+    <div class="sub" id="subtitle">Connexion…</div>
+  </header>
+
+  <div class="status"><span class="dot" id="dot"></span><span id="status-text">Recherche de la position…</span></div>
+
+  <div class="empty" id="empty"></div>
+
+  <div class="gauges">
+    <div class="gauge"><div class="value" id="g-dist">—<small>nq</small></div><div class="label">DISTANCE TOTALE</div></div>
+    <div class="gauge"><div class="value" id="g-avg">—<small>nd</small></div><div class="label">VITESSE MOYENNE</div></div>
+    <div class="gauge"><div class="value" id="g-max">—<small>nd</small></div><div class="label">VITESSE MAXIMALE</div></div>
+    <div class="gauge"><div class="value" id="g-dur">—</div><div class="label">DURÉE</div></div>
+  </div>
+  <div class="meta">
+    <span>Vitesse actuelle <b id="m-speed">—</b></span>
+    <span>Dernière position <b id="m-last">—</b></span>
+    <span>Position <b id="m-pos">—</b></span>
+  </div>
+
+
+  <div id="map"></div>
+  <div class="map-tools">
+    <button id="follow-btn" class="active">Suivre le bateau</button>
+    <button id="fit-btn">Voir tout le tracé</button>
+    <button id="layer-btn">Amers marins : oui</button>
+  </div>
+
+  <footer>Page mise à jour automatiquement, rien à recharger. Positions envoyées par le téléphone du bord dès qu'il capte le réseau — en mer, loin des côtes, il peut y avoir des trous de plusieurs heures. Le tracé ne remplace pas une carte marine. Fond de carte © OpenStreetMap, amers © OpenSeaMap.</footer>
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const topic = (params.get('t') || params.get('topic') || location.hash.replace(/^#/, '') || '').trim();
+  const POLL_MS = 30000;
+  const STALE_MS = 15*60*1000;
+
+  let data = null;           // dernier état reçu
+  let lastId = null;
+  let follow = true, moveByApp = false, firstFit = true;
+  let seamarkOn = true;
+
+  // ---------- carte ----------
+  const map = L.map('map', { zoomControl:true, attributionControl:true }).setView([43.5, 7.0], 8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© contributeurs OpenStreetMap'
+  }).addTo(map);
+  const seamark = L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: '© OpenSeaMap'
+  }).addTo(map);
+  const trackShadow = L.polyline([], { color:'#0A1C2E', weight:7, opacity:0.55 }).addTo(map);
+  const track = L.polyline([], { color:'#E8432E', weight:4, opacity:0.95, lineJoin:'round' }).addTo(map);
+  const startMarker = L.circleMarker([0,0], { radius:7, color:'#0A1C2E', weight:2, fillColor:'#8A7239', fillOpacity:1 });
+  const boatIcon = L.divIcon({
+    className:'boat-icon', iconSize:[30,30], iconAnchor:[15,15],
+    html:'<svg width="30" height="30" viewBox="0 0 30 30"><circle cx="15" cy="15" r="13" fill="rgba(201,162,75,0.25)"/><circle cx="15" cy="15" r="8" fill="#C9A24B" stroke="#0A1C2E" stroke-width="2.5"/></svg>'
+  });
+  const boat = L.marker([0,0], { icon: boatIcon, zIndexOffset: 1000 });
+
+  map.on('movestart zoomstart', ()=>{
+    if(moveByApp) return;
+    follow = false;
+    $('follow-btn').classList.remove('active');
+  });
+  function appMove(fn){ moveByApp = true; fn(); setTimeout(()=>{ moveByApp = false; }, 400); }
+
+  $('follow-btn').addEventListener('click', ()=>{
+    follow = true; $('follow-btn').classList.add('active');
+    if(data) appMove(()=>map.setView([data.la, data.lo], Math.max(map.getZoom(), 13)));
+  });
+  $('fit-btn').addEventListener('click', fitAll);
+  $('layer-btn').addEventListener('click', ()=>{
+    seamarkOn = !seamarkOn;
+    if(seamarkOn) seamark.addTo(map); else map.removeLayer(seamark);
+    $('layer-btn').textContent = 'Amers marins : ' + (seamarkOn ? 'oui' : 'non');
+  });
+
+  function fitAll(){
+    const ll = track.getLatLngs();
+    if(ll.length > 1) appMove(()=>map.fitBounds(L.latLngBounds(ll), { padding:[30,30], maxZoom:17 }));
+    else if(data) appMove(()=>map.setView([data.la, data.lo], 15));
+  }
+
+  // ---------- décodage du tracé (format polyline) ----------
+  function decodePolyline(str){
+    const out = []; let i = 0, lat = 0, lon = 0;
+    while(i < str.length){
+      let b, shift = 0, result = 0;
+      do{ b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; }while(b >= 0x20 && i < str.length);
+      lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+      shift = 0; result = 0;
+      do{ b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; }while(b >= 0x20 && i < str.length);
+      lon += (result & 1) ? ~(result >> 1) : (result >> 1);
+      out.push([lat/1e5, lon/1e5]);
+    }
+    return out;
+  }
+
+  // ---------- affichage ----------
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function fmtDur(ms){
+    const s = Math.max(0, Math.floor(ms/1000));
+    return pad(Math.floor(s/3600)) + ':' + pad(Math.floor(s%3600/60)) + ':' + pad(s%60);
+  }
+  function ago(ms){
+    const m = Math.floor(ms/60000);
+    if(m < 1) return "à l'instant";
+    if(m < 60) return 'il y a ' + m + ' min';
+    const h = Math.floor(m/60);
+    return 'il y a ' + h + ' h ' + pad(m%60);
+  }
+  function fmtDate(ts){
+    return new Date(ts).toLocaleString('fr-FR', { weekday:'short', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit' });
+  }
+  function setVal(id, v, unit){ $(id).innerHTML = v + (unit ? '<small>'+unit+'</small>' : ''); }
+
+  function render(){
+    if(!data) return;
+    $('title').textContent = data.n || 'Trajet en voilier';
+    document.title = (data.n ? data.n + ' — ' : '') + 'Suivi en direct';
+    $('subtitle').textContent = data.st ? 'Départ ' + fmtDate(data.st) : 'Trajet pas encore démarré';
+
+    const pts = data.p ? decodePolyline(data.p) : [];
+    const here = [data.la, data.lo];
+    if(pts.length){
+      const lastP = pts[pts.length-1];
+      if(Math.abs(lastP[0]-here[0]) > 1e-5 || Math.abs(lastP[1]-here[1]) > 1e-5) pts.push(here);
+    }
+    track.setLatLngs(pts); trackShadow.setLatLngs(pts);
+    if(pts.length){ startMarker.setLatLng(pts[0]).addTo(map); } else map.removeLayer(startMarker);
+    boat.setLatLng(here).addTo(map);
+
+    if(firstFit){ firstFit = false; fitAll(); }
+    else if(follow){ appMove(()=>map.panTo(here)); }
+
+    setVal('g-dist', (data.d||0).toFixed(1), 'nq');
+    setVal('g-avg', (data.a||0).toFixed(1), 'nd');
+    setVal('g-max', (data.m||0).toFixed(1), 'nd');
+    $('m-speed').textContent = data.on && data.s != null ? data.s.toFixed(1) + ' nd' : '—';
+    $('m-pos').textContent = data.la.toFixed(4) + ', ' + data.lo.toFixed(4);
+    tick();
+  }
+
+  // horloge : durée qui avance pendant la navigation, fraîcheur des données
+  function tick(){
+    if(!data) return;
+    const now = Date.now();
+    const dur = data.on ? data.ms + Math.max(0, now - data.t) : data.ms;
+    $('g-dur').textContent = fmtDur(dur);
+    $('m-last').textContent = ago(now - (data.ft || data.t));
+    const age = now - data.t;
+    const dot = $('dot');
+    dot.className = 'dot';
+    if(!data.on){
+      dot.classList.add('stopped');
+      $('status-text').innerHTML = '<b>Suivi arrêté</b> par le bord · dernier envoi ' + ago(age);
+    } else if(age > STALE_MS){
+      dot.classList.add('stale');
+      $('status-text').innerHTML = '<b>Pas de nouvelles depuis ' + ago(age).replace('il y a ', '') + '</b> · probablement hors réseau, la position reviendra dès que le téléphone captera';
+    } else {
+      dot.classList.add('live');
+      $('status-text').innerHTML = '<b>En direct</b> · mis à jour ' + ago(age);
+    }
+  }
+  setInterval(tick, 1000);
+
+  // ---------- réception (relais ntfy.sh) ----------
+  function showEmpty(html){ $('empty').innerHTML = html; $('empty').classList.add('show'); }
+  function hideEmpty(){ $('empty').classList.remove('show'); }
+
+  async function poll(){
+    const since = lastId || 'latest';
+    try{
+      const r = await fetch('https://ntfy.sh/' + encodeURIComponent(topic + '-data') + '/json?poll=1&since=' + encodeURIComponent(since), { cache:'no-store' });
+      if(!r.ok) throw new Error('http ' + r.status);
+      const text = await r.text();
+      let newest = null;
+      text.split('\n').forEach(line=>{
+        if(!line.trim()) return;
+        try{
+          const ev = JSON.parse(line);
+          if(ev.event !== 'message' || !ev.message) return;
+          const d = JSON.parse(ev.message);
+          if(d && d.v === 1 && isFinite(d.la) && isFinite(d.lo)){
+            if(!newest || d.t >= newest.d.t) newest = { id: ev.id, d };
+          }
+        }catch(e){}
+      });
+      if(newest){
+        lastId = newest.id;
+        if(!data || newest.d.t >= data.t){ data = newest.d; hideEmpty(); render(); }
+      } else if(!data){
+        showEmpty("Aucune position reçue pour l'instant.<br>Le bateau n'a peut-être pas encore démarré le suivi, ou il n'a pas de réseau. Gardez cette page ouverte : la carte apparaîtra toute seule dès le premier envoi.<br><br><small>Le relais ne garde les positions que 12 heures : si le téléphone du bord est resté plus longtemps sans réseau, il faut attendre son prochain envoi.</small>");
+        $('status-text').textContent = 'En attente du premier envoi…';
+      }
+    }catch(e){
+      if(!data){
+        showEmpty('Connexion au relais impossible pour le moment. Vérifiez votre connexion internet — nouvel essai automatique dans 30 secondes.');
+      }
+    }
+  }
+
+  if(!topic){
+    showEmpty("Ce lien est incomplet : il manque le code de suivi.<br>Demandez au bord de renvoyer le lien depuis ARnavtrack (bouton « Envoyer le lien de suivi live »).");
+    $('status-text').textContent = 'Lien incomplet';
+    $('subtitle').textContent = '';
+  } else {
+    poll();
+    setInterval(poll, POLL_MS);
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) poll(); });
+  }
+})();
+</script>
+</body>
+</html>
